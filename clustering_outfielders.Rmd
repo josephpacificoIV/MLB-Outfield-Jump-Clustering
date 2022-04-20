@@ -1,0 +1,658 @@
+---
+title: "clustering_outfielders"
+output: html_document
+---
+
+```{r, set.seed(12345)}
+knitr::opts_chunk$set(cache = T)
+set.seed(12345)
+```
+
+```{r}
+#library(shiny)
+#library(shinythemes)
+#library(data.table)
+#library(DT)
+library(tidyverse)
+#library(NYMss)
+#library(nymrd)
+library(zoo)
+library(baseballr)
+  ##Read in Data
+    seconds_since_2021 <- scrape_savant_leaderboards(
+      leaderboard = "running_splits_90_ft",
+      year = 2021, 
+      player_type = "batter"
+    )
+    seconds_since_2020 <- scrape_savant_leaderboards(
+      leaderboard = "running_splits_90_ft",
+      year = 2020, 
+      player_type = "batter"
+    )
+    seconds_since_2019 <- scrape_savant_leaderboards(
+      leaderboard = "running_splits_90_ft",
+      year = 2019, 
+      player_type = "batter"
+    )
+    seconds_since_2018 <- scrape_savant_leaderboards(
+      leaderboard = "running_splits_90_ft",
+      year = 2018, 
+      player_type = "batter"
+    )
+    
+    seconds_since_raw <- full_join(seconds_since_2021, seconds_since_2020)
+    
+    seconds_since_raw <- full_join(seconds_since_raw, seconds_since_2019)
+    seconds_since_raw <- full_join(seconds_since_raw, seconds_since_2018)
+    
+    #seconds_since_raw <- read.csv('C:/Users/JPacifico.NY-METS/Documents/Performance Science/shiny_h2f/JoesApp/data/seconds_since_raw.csv', encoding = 'UTF-8')
+    #seconds_since_raw <- read.csv('data/seconds_since_raw.csv', encoding = 'Latin1')
+    
+    seconds_since_raw <- seconds_since_raw %>%
+      #filter(name_abbrev == "NYM") %>%
+      dplyr::rename(c("Year" = "year"))
+    
+    seconds_since <- seconds_since_raw 
+    
+
+
+  ##Build out variables
+  avg_velo <-
+    seconds_since %>%
+    summarize(last_name,
+              first_name,
+              Year,
+              bat_side,
+              position_name,
+              name_abbrev,
+              avg_velo_000 = 0,
+              avg_velo_005 =
+                5/(seconds_since_hit_005 - seconds_since_hit_000),
+              avg_velo_010 =
+                5/(seconds_since_hit_010 - seconds_since_hit_005),
+              avg_velo_015 =
+                5/(seconds_since_hit_015 - seconds_since_hit_010),
+              avg_velo_020 =
+                5/(seconds_since_hit_020 - seconds_since_hit_015),
+              avg_velo_025 =
+                5/(seconds_since_hit_025 - seconds_since_hit_020),
+              avg_velo_030 =
+                5/(seconds_since_hit_030 - seconds_since_hit_025),
+              avg_velo_035 =
+                5/(seconds_since_hit_035 - seconds_since_hit_030),
+              avg_velo_040 =
+                5/(seconds_since_hit_040 - seconds_since_hit_035),
+              avg_velo_045 =
+                5/(seconds_since_hit_045 - seconds_since_hit_040),
+              avg_velo_050 =
+                5/(seconds_since_hit_050 - seconds_since_hit_045),
+              avg_velo_055 =
+                5/(seconds_since_hit_055 - seconds_since_hit_050),
+              avg_velo_060 =
+                5/(seconds_since_hit_060 - seconds_since_hit_055),
+              avg_velo_065 =
+                5/(seconds_since_hit_065 - seconds_since_hit_060),
+              avg_velo_070 =
+                5/(seconds_since_hit_070 - seconds_since_hit_065),
+              avg_velo_075 =
+                5/(seconds_since_hit_075 - seconds_since_hit_070),
+              avg_velo_080 =
+                5/(seconds_since_hit_080 - seconds_since_hit_075),
+              avg_velo_085 =
+                5/(seconds_since_hit_085 - seconds_since_hit_080),
+              avg_velo_090 =
+                5/(seconds_since_hit_090 - seconds_since_hit_085)
+    )
+
+  ##Find Fastest Split
+  #avg_velo <- data.table(avg_velo)
+  #avg_velo[,fastest_split :=  names(.SD)[max.col(.SD)], .SDcols = 6:24]
+  #avg_velo[,fastest_speed := do.call(pmax,.SD), .SDcols = 6:24]
+  avg_velo <- avg_velo  %>%
+    mutate_at(vars(starts_with("avg_velo")), funs(round(., 2))) %>%
+    rownames_to_column('id') %>%  # creates an ID number
+    left_join(
+      avg_velo %>%
+        mutate_at(vars(starts_with("avg_velo")), funs(round(., 2))) %>%
+        rownames_to_column('id') %>%
+        gather(fastest_split, fastest_speed, avg_velo_000:avg_velo_090) %>%
+        #pivot_longer(cols = avg_velo_000:avg_velo_090) %>%
+        group_by(id, Year, last_name, first_name, bat_side, name_abbrev, position_name) %>%
+        mutate(dept_rank  = rank(-fastest_speed, ties.method = "first")) %>% # or 'last'
+        filter(dept_rank == 1) %>% 
+        dplyr::select(!c(dept_rank)), 
+      by = c('id', 'last_name', 'first_name', 'Year', 'bat_side', 'name_abbrev', 'position_name')
+    ) %>%
+    dplyr::select(!c(id)) 
+  
+  ##Time spent above threshold
+  avg_velo <- avg_velo %>%
+    mutate(percent_70 = 0.70 * fastest_speed,
+           percent_80 = 0.80 * fastest_speed,
+           percent_90 = 0.90 * fastest_speed)
+
+  ##Find split where athelte reaches maximum velocity
+  avg_velo <- avg_velo %>%
+    pivot_longer(cols = starts_with('avg_velo_')) %>%
+    dplyr::select(name_abbrev, Year, last_name, first_name, bat_side, position_name, fastest_split, fastest_speed, name, value, percent_70, percent_80, percent_90) %>%
+    group_by(last_name, first_name, Year, name_abbrev, position_name) %>%
+    mutate(interval_70 =
+             case_when(value >= percent_70 ~ name),
+           interval_80 =
+             case_when(value >= percent_80 ~ name),
+           interval_90 =
+             case_when(value >= percent_90 ~ name)
+    )
+
+
+
+  avg_velo <- avg_velo %>%
+    group_by(last_name, first_name, Year, name_abbrev, bat_side, position_name) %>%
+    mutate(interval_70 =
+             first(na.omit(interval_70)),
+           interval_80 =
+             first(na.omit(interval_80)),
+           interval_90 =
+             first(na.omit(interval_90))
+    )
+
+  # interval_70
+  seconds_70 <- str_extract_all(avg_velo$interval_70, "\\(?[0-9,.]+\\)?")
+  seconds_70 <- data_frame(id = seq_along(seconds_70), mylist = seconds_70) %>%
+    unnest %>%
+    group_by(id) %>%
+    plyr::rename(c('id' = 'id70',
+                   'mylist' = 'mylist70'))
+  avg_velo <- cbind(avg_velo, seconds_70)
+
+  avg_velo$mylist70 <- paste0("seconds_since_hit_", avg_velo$mylist70)
+
+
+  # interval_80
+  interval_80 <- str_extract_all(avg_velo$interval_80, "\\(?[0-9,.]+\\)?")
+  interval_80 <- data_frame(id = seq_along(interval_80), mylist = interval_80) %>%
+    unnest %>%
+    group_by(id) %>%
+    plyr::rename(c('id' = 'id80',
+                   'mylist' = 'mylist80'))
+  avg_velo <- cbind(avg_velo, interval_80)
+  avg_velo$mylist80 <- paste0("seconds_since_hit_", avg_velo$mylist80)
+
+  # interval_90
+  interval_90 <- str_extract_all(avg_velo$interval_90, "\\(?[0-9,.]+\\)?")
+  interval_90 <- data_frame(id = seq_along(interval_90), mylist = interval_90) %>%
+    unnest %>%
+    group_by(id) %>%
+    plyr::rename(c('id' = 'id90',
+                   'mylist' = 'mylist90'))
+  avg_velo <- cbind(avg_velo, interval_90)
+  avg_velo$mylist90 <- paste0("seconds_since_hit_", avg_velo$mylist90)
+
+  # switch back to pivot_wider format, and merge with seconds_since
+  avg_velo$id70 <- NULL
+  avg_velo$id80 <- NULL
+  avg_velo$id90 <- NULL
+
+  avg_velo <- avg_velo %>%
+    group_by(last_name, first_name, Year, name_abbrev, position_name) %>%
+    pivot_wider(names_from = name,
+                values_from = value)
+
+  
+  velo_seconds <- left_join(avg_velo, seconds_since)
+  
+  
+  
+  ## Calculate the time between the two to see how long the % threshold was held and do the same for distance.
+  col_extract <- velo_seconds %>%
+    dplyr::select(mylist70, mylist80, mylist90) %>%
+    plyr::rename(c('mylist70' = 'mylist70_var',
+                   'mylist80' = 'mylist80_var',
+                   'mylist90' = 'mylist90_var'))
+
+  velo_seconds <- velo_seconds %>%
+    mutate_at(
+      vars(
+        c('mylist70', 'mylist80', 'mylist90')
+      ),
+      funs(
+        case_when(
+          #. == "seconds_since_hit_000" ~ seconds_since_hit_000,
+          . == "seconds_since_hit_005" ~ seconds_since_hit_005,
+          . == "seconds_since_hit_010" ~ seconds_since_hit_010,
+          . == "seconds_since_hit_015" ~ seconds_since_hit_015,
+          . == "seconds_since_hit_020" ~ seconds_since_hit_020,
+          . == "seconds_since_hit_025" ~ seconds_since_hit_025,
+          . == "seconds_since_hit_030" ~ seconds_since_hit_030,
+          . == "seconds_since_hit_035" ~ seconds_since_hit_035,
+          . == "seconds_since_hit_040" ~ seconds_since_hit_040,
+          . == "seconds_since_hit_045" ~ seconds_since_hit_045,
+          . == "seconds_since_hit_050" ~ seconds_since_hit_050,
+          . == "seconds_since_hit_055" ~ seconds_since_hit_055,
+          . == "seconds_since_hit_060" ~ seconds_since_hit_060,
+          . == "seconds_since_hit_065" ~ seconds_since_hit_065,
+          . == "seconds_since_hit_070" ~ seconds_since_hit_070,
+          . == "seconds_since_hit_075" ~ seconds_since_hit_075,
+          . == "seconds_since_hit_080" ~ seconds_since_hit_080,
+          . == "seconds_since_hit_085" ~ seconds_since_hit_085,
+          . == "seconds_since_hit_090" ~ seconds_since_hit_090
+        )
+      ))
+
+
+  ##Find out distance at which reached each threshold.
+  # ungroup and add back the columns
+  col_extract <- col_extract %>%
+    ungroup() %>%
+    dplyr::select(mylist70_var, mylist80_var, mylist90_var)
+
+  # add the two back together again
+  total_distance <- cbind(velo_seconds, col_extract)  %>%
+    dplyr::select(last_name, first_name, Year, name_abbrev, mylist70, mylist70_var, mylist80, mylist80_var, mylist90, mylist90_var, bat_side)
+
+  # get total distance
+  total_distance <- total_distance %>%
+    separate(mylist70_var, into=c("mylist70_var", "mylist70_feet"), sep="seconds_since_hit_", remove = FALSE) %>%
+    separate(mylist80_var, into=c("mylist80_var", "mylist80_feet"), sep="seconds_since_hit_", remove = FALSE) %>%
+    separate(mylist90_var, into=c("mylist90_var", "mylist90_feet"), sep="seconds_since_hit_", remove = FALSE) %>%
+    dplyr::select(!c(mylist70_var,mylist80_var,mylist90_var)) %>%
+    mutate(feet_in70 =
+             as.integer(mylist80_feet) - as.integer(mylist70_feet),
+           feet_in80 =
+             as.integer(mylist90_feet) - as.integer(mylist80_feet),
+           feet_in90 =
+             90 - as.integer(mylist90_feet)
+    )
+  # get avg acceleration at each interval 
+  velo_seconds <- velo_seconds  %>%
+    mutate(
+      avg_acc_000 =
+        0 ,
+      avg_acc_005 =
+        (avg_velo_005 - avg_velo_000) / (seconds_since_hit_005 - seconds_since_hit_000),
+      avg_acc_010 =
+        (avg_velo_010 - avg_velo_005) / (seconds_since_hit_010 - seconds_since_hit_005),
+      avg_acc_015 =
+        (avg_velo_015 - avg_velo_010) / (seconds_since_hit_015 - seconds_since_hit_010),
+      avg_acc_020 =
+        (avg_velo_020 - avg_velo_015) / (seconds_since_hit_020 - seconds_since_hit_015),
+      avg_acc_025 =
+        (avg_velo_025 - avg_velo_020) / (seconds_since_hit_025 - seconds_since_hit_020),
+      avg_acc_030 =
+        (avg_velo_030 - avg_velo_025) / (seconds_since_hit_030 - seconds_since_hit_025),
+      avg_acc_035 =
+        (avg_velo_035 - avg_velo_030) / (seconds_since_hit_035 - seconds_since_hit_030),
+      avg_acc_040 =
+        (avg_velo_040 - avg_velo_035) / (seconds_since_hit_040 - seconds_since_hit_035),
+      avg_acc_045 =
+        (avg_velo_045 - avg_velo_040) / (seconds_since_hit_045 - seconds_since_hit_040),
+      avg_acc_050 =
+        (avg_velo_050 - avg_velo_045) / (seconds_since_hit_050 - seconds_since_hit_045),
+      avg_acc_055 =
+        (avg_velo_055 - avg_velo_050) / (seconds_since_hit_055 - seconds_since_hit_050),
+      avg_acc_060 =
+        (avg_velo_060 - avg_velo_055) / (seconds_since_hit_060 - seconds_since_hit_055),
+      avg_acc_065 =
+        (avg_velo_065 - avg_velo_060) / (seconds_since_hit_065 - seconds_since_hit_060),
+      avg_acc_070 =
+        (avg_velo_070 - avg_velo_065) / (seconds_since_hit_070 - seconds_since_hit_065),
+      avg_acc_075 =
+        (avg_velo_075 - avg_velo_070) / (seconds_since_hit_075 - seconds_since_hit_070),
+      avg_acc_080 =
+        (avg_velo_080 - avg_velo_075) / (seconds_since_hit_080 - seconds_since_hit_075),
+      avg_acc_085 =
+        (avg_velo_085 - avg_velo_080) / (seconds_since_hit_085 - seconds_since_hit_080),
+      avg_acc_090 =
+        (avg_velo_090 - avg_velo_085) / (seconds_since_hit_090 - seconds_since_hit_085)
+    )
+
+  ## Find split with highest acceleration
+  # impute an average for Jeff McNeil outlier of 88 acc at 90 ft.
+  velo_seconds$avg_acc_090[velo_seconds$Year == 2020] <- -13.87483/2
+  #velo_seconds$avg_acc_090[velo_seconds$Year == 2019]+velo_seconds$avg_acc_090[velo_seconds$Year == 2018]
+  #velo_seconds <- data.table(velo_seconds)
+  #velo_seconds[,fastest_acc_split :=  names(.SD)[max.col(.SD)], .SDcols = 59:77]
+  #velo_seconds[,fastest_acc := do.call(pmax,.SD), .SDcols = 59:77]
+  #velo_seconds <- as.data.frame(velo_seconds)
+  # impute an average for Jeff McNeil outlier of 88 acc at 90 ft. 
+  velo_seconds$avg_acc_090[velo_seconds$Year == 2020] <- -13.87483/2
+  
+  #velo_seconds$avg_acc_090[velo_seconds$Year == 2019]+velo_seconds$avg_acc_090[velo_seconds$Year == 2018]
+  #velo_seconds <- data.table::data.table(velo_seconds)
+  #velo_seconds[,fastest_acc_split :=  names(.SD)[max.col(.SD)], .SDcols = 59:77]
+  #velo_seconds[,fastest_acc := do.call(pmax,.SD), .SDcols = 59:77]
+  #velo_seconds <- as.data.frame(velo_seconds)
+  
+  velo_seconds <- velo_seconds  %>%
+    mutate_at(vars(starts_with("avg_acc")), funs(round(., 2))) %>%
+    rownames_to_column('id') %>%  # creates an ID number
+    left_join(
+      velo_seconds %>%
+        mutate_at(vars(starts_with("avg_acc")), funs(round(., 2))) %>%
+        rownames_to_column('id') %>%
+        gather(fastest_acc_split, fastest_acc, avg_acc_000:avg_acc_090) %>%
+        #pivot_longer(cols = avg_velo_000:avg_velo_090) %>%
+        group_by(id, Year, last_name, first_name, bat_side, name_abbrev, position_name) %>%
+        mutate(dept_rank  = rank(-fastest_acc, ties.method = "first")) %>% # or 'last'
+        filter(dept_rank == 1) %>% 
+        dplyr::select(!c(dept_rank))
+    ) %>%
+    dplyr::select(!c(id)) 
+  
+  
+  # filter down to NYM for plotting
+  velo_seconds_league <- velo_seconds
+  avg_velo_league <- avg_velo
+  
+  #velo_seconds <- velo_seconds %>%
+    #filter(name_abbrev == "NYM")
+  
+  #avg_velo <- avg_velo %>%
+    #filter(name_abbrev == "NYM")
+
+```
+
+
+# filter down to variables used in clustering
+```{r}
+
+
+velo_seconds_league <- velo_seconds_league %>%
+  filter(Year == 2021) %>%
+  filter(position_name %in% c("LF", "RF", "CF")) %>%
+  dplyr::select(fastest_speed, fastest_acc) %>%
+  unite(name, first_name, last_name, sep = " ")
+
+velo_seconds_league
+```
+
+
+# bring in jump data
+```{r}
+
+jump <- read.csv("jump.csv", encoding = 'UTF-8')
+
+#scrape_savant_leaderboards(leaderboard = "outs_above_average")
+
+jump <- jump %>% 
+  dplyr::rename(c("last_name" = "X.U.FEFF.last_name")) %>%
+  unite(name, first_name, last_name, sep = " ")
+
+jump <- jump %>%
+  group_by(name, resp_fielder_id, year) %>%
+  dplyr::select(outs_above_average, rel_league_burst_distance, rel_league_reaction_distance, rel_league_routing_distance)
+
+jump$name <- str_trim(jump$name, side = "left")
+
+jump
+
+```
+
+
+
+# combine jump and velo_seconds_league for clustering
+```{r}
+
+
+data <- left_join(velo_seconds_league, jump, by = c("name" = "name", "Year" = "year")) %>%
+  filter(!is.na(resp_fielder_id)) %>% 
+  group_by(Year, name_abbrev, position_name, resp_fielder_id)
+
+data <- data %>%
+  dplyr::select(resp_fielder_id, everything()) %>%
+  dplyr::rename(c("oaa" = "outs_above_average", 
+                  "rel_burst" = "rel_league_burst_distance"), 
+                "rel_reaction" = "rel_league_reaction_distance", 
+                "rel_route" = "rel_league_routing_distance")
+
+#jump %>%
+  #filter(str_detect(name, "Enrique"))
+#velo_seconds_league %>%
+  #filter(str_detect(name, "Enrique")) %>%
+  #left_join(jump)
+
+data
+#write.csv(velo_seconds_league, "velo_seconds_league.csv")
+```
+
+
+```{r}
+
+
+input <- data[, 6:11]
+# standardize the data
+input <- as.data.frame(scale(input))
+
+input
+
+```
+
+
+# pca analysis
+```{r}
+set.seed(12345)
+pca <- prcomp(data[, 6:11], center = TRUE,scale. = TRUE)
+summary(pca)
+
+# take original pca, find optimal clusters for first 3 pca components, 0.8226
+pca.input <- pca$x[,1:3]
+
+```
+
+
+# choose K = 6 for pca.input
+```{r}
+factoextra::fviz_nbclust(pca.input, kmeans, method='silhouette')
+factoextra::fviz_nbclust(pca.input, kmeans, method='wss')
+factoextra::fviz_nbclust(pca.input, kmeans, method='gap_stat')
+
+set.seed(12345)
+#KMEANS on 3 principal components using 3 clusters 
+clustering <- kmeans(pca.input, 6, nstart = 50)
+# (between_SS / total_SS =  69.3 %)
+print(clustering)
+```
+
+# visualize pca 
+```{r}
+
+library(pca3d)
+library(cluster)
+library(factoextra)
+
+# visualize 3d pca plot PC1 PC2 PC3
+#pca3d(pca.input, group=clustering$cluster, show.ellipses = T)
+#snapshotPCA3d(file="pca_3d_milb_clean.png")
+
+# better silhouettes due to dimensionality reduction in pca
+sil <- silhouette(clustering$cluster, dist(pca.input))
+#png(filename = "silhouette2.png")
+fviz_silhouette(sil) 
+#dev.off()
+
+# apply pca-based kmeans cluster labels to original input 
+# visualize 2nd kmeans cluster labels on original input
+#png(filename = "kmeans_2D.png")
+fviz_cluster(clustering, data = input, geom = c("point"), ellipse.type = "euclid") + ggtitle("Clusters from PCA Comp 1 & 2")
+#dev.off()
+
+
+
+#png(filename = "pca1.png")
+factoextra::fviz_pca_biplot(pca, label = "var", habillage=clustering$cluster, ellipse.level=0.95, addEllipses = TRUE, repel = TRUE, alpha.var = 1, alpha.ind = 0.5) + ggtitle("PCA - Biplot")
+#dev.off()
+
+
+
+```
+
+
+
+# look at each cluster
+```{r}
+library(GGally)
+library(plotly)
+
+# add the cluster label to original "summarydf" dataset
+data$cluster <- clustering$cluster
+data$cluster <- as.factor(data$cluster)
+
+
+p <- ggparcoord(data = data, 
+                columns = 6:11, 
+                groupColumn = "cluster", 
+                order = "anyClass", 
+                showPoints = T, 
+                scale = "std", 
+                alphaLines = 0) + 
+  labs(x = "metrics", y = "value (in standard-deviation units)", title = "Clustering") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  #geom_jitter(position = position_jitter(width = 0.1, height = 0.1)) + 
+  geom_boxplot(outlier.color = "blue", outlier.fill = "blue")
+
+p$layers #<- c(geom_line(), geom_boxplot(), geom_point())
+
+ggplotly(p)
+```
+
+
+
+```{r}
+
+
+cluster_averages <- data %>%
+  ungroup() %>%
+  group_by(cluster) %>%
+  summarise(n = length(name), 
+    across(.cols = fastest_speed:rel_route,list(mean = mean))
+)
+  
+cluster_averages
+#write.csv(cluster_averages, file = "cluster_averages.csv")
+
+data %>%
+  filter(cluster == 6)
+```
+
+
+https://baseballsavant.mlb.com/leaderboard/outfield_jump?year=2021&min=q&sort=8&sortDir=asc
+
+does speed limit a players ability in the outfield? 
+
+https://www.mlb.com/glossary/statcast/jump
+https://www.mlb.com/glossary/statcast/outs-above-average
+https://www.r-bloggers.com/2021/10/analysis-of-variance-in-r-3-steps/
+https://stats.stackexchange.com/questions/28938/why-do-linear-regression-and-anova-give-different-p-value-in-case-of-consideri
+https://stats.stackexchange.com/questions/20002/regression-vs-anova-discrepancy-aov-vs-lm-in-r
+https://journals.sagepub.com/doi/full/10.1177/2325967119888499
+```{r}
+
+mod1 <- lm(rel_burst ~ fastest_speed , data=input)
+
+mod2 <- lm(rel_reaction ~ fastest_speed, data=input)
+
+mod3 <- lm(rel_route ~ fastest_speed, data=input)
+
+summary(mod1)
+anova(mod1)
+
+summary(mod2)
+anova(mod2)
+
+summary(mod3)
+anova(mod3)
+
+#mod2 <- aov(fastest_speed ~ fastest_acc + oaa + rel_burst + rel_reaction + rel_route, data=input)
+
+
+
+
+```
+
+Type III (Marginal) Sums of Squares is used by default in lm. AOV would use Type I (Sequential) by default. LM results are invariant to order while aov results depend on the order of the factors.
+
+https://stats.stackexchange.com/questions/20002/regression-vs-anova-discrepancy-aov-vs-lm-in-r
+
+
+# visualize regression plots
+```{r}
+
+mod1.metrics <- broom::augment(mod1)
+head(mod1.metrics)
+
+mod2.metrics <- broom::augment(mod2)
+head(mod2.metrics)
+
+mod3.metrics <- broom::augment(mod3)
+head(mod3.metrics)
+
+```
+
+http://www.sthda.com/english/articles/39-regression-model-diagnostics/161-linear-regression-assumptions-and-diagnostics-in-r-essentials/
+
+```{r}
+#newdata <- log(data[, 6:11])
+#names(newdata) <- paste0(names(data[, 6:11]), "_log")
+
+#png("mod1_reg.png")
+ggplot(mod1.metrics, aes(rel_burst, fastest_speed)) +
+  geom_point() +
+  geom_jitter() +
+  stat_smooth(method = lm, se = FALSE) +
+  #geom_segment(aes(xend = fastest_speed, yend = .fitted), color = "red", size = 0.3) 
+  ggtitle("Speed & Burst")
+#dev.off()
+```
+
+
+
+```{r}
+
+#png("mod2_reg.png")
+ggplot(mod2.metrics, aes(rel_reaction, fastest_speed)) +
+  geom_point() +
+  geom_jitter() +
+  stat_smooth(method = lm, se = FALSE) +
+  #geom_segment(aes(xend = fastest_speed, yend = .fitted), color = "red", size = 0.3) 
+  ggtitle("Speed & Reaction") 
+#dev.off()
+```
+
+
+
+```{r}
+#png("mod3_rg.png")
+ggplot(mod3.metrics, aes(rel_route, fastest_speed)) +
+  geom_point() +
+  geom_jitter() +
+  stat_smooth(method = lm, se = FALSE) +
+  #geom_segment(aes(xend = fastest_speed, yend = .fitted), color = "red", size = 0.3)
+  ggtitle("Speed & Route")
+#dev.off()
+```
+
+
+
+
+
+# variance inflation factor
+```{r}
+
+car::vif(mod1)
+
+```
+
+
+
+```{r}
+
+
+ggplot(jump) +
+  geom_point(aes(x=rel_league_reaction_distance, y=rel_league_routing_distance, colour = outs_above_average))
+
+
+```   
+
+
+So now you have an understanding of what contributes to the performance and cluster based on performance. I wonder if the final thing would be to use decision tree to try and predict OAA?
+
